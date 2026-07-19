@@ -192,8 +192,8 @@ export class Home {
         this.router.navigate(['/user']);
       }
     } catch(e: any) {
-      this.error.set('Terjadi kesalahan jaringan.');
-      console.error(e);
+      this.error.set('Gagal: ' + (e.message || 'Terjadi kesalahan jaringan.'));
+      console.error("Login Error:", e);
     } finally {
       this.loading.set(false);
     }
