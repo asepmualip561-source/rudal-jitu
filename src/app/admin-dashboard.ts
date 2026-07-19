@@ -1,16 +1,16 @@
 import { ChangeDetectionStrategy, Component, signal, inject, OnInit, PLATFORM_ID } from '@angular/core';
-import { isPlatformBrowser } from '@angular/common';
+import { isPlatformBrowser, DatePipe } from '@angular/common';
 import { DecimalPipe } from '@angular/common';
 import { Router } from '@angular/router';
 import { MatIconModule } from '@angular/material/icon';
 import { db } from './firebase';
-import { collection, doc, writeBatch, getDocs, query, limit, serverTimestamp, getCountFromServer } from 'firebase/firestore';
+import { collection, doc, writeBatch, getDocs, query, limit, serverTimestamp, getCountFromServer, orderBy, updateDoc, deleteDoc } from 'firebase/firestore';
 import * as XLSX from 'xlsx';
 
 @Component({
   changeDetection: ChangeDetectionStrategy.OnPush,
   selector: 'app-admin-dashboard',
-  imports: [MatIconModule, DecimalPipe],
+  imports: [MatIconModule, DecimalPipe, DatePipe],
   template: `
     <div class="min-h-screen bg-[#020617] text-slate-100 font-sans flex flex-col relative overflow-hidden">
       
@@ -105,6 +105,87 @@ import * as XLSX from 'xlsx';
 
           </div>
           
+          <!-- Token Listing Table -->
+          <div class="bg-white/5 backdrop-blur-md border border-white/10 rounded-2xl p-6 shadow-xl">
+             <div class="flex items-center justify-between mb-4">
+                <h2 class="text-slate-400 text-xs font-bold tracking-widest uppercase flex items-center gap-2">
+                  <mat-icon class="text-emerald-400 text-sm w-4 h-4">list</mat-icon>
+                  Daftar Token Akses
+                </h2>
+                <button (click)="loadTokens()" class="text-xs text-blue-400 hover:underline font-bold uppercase tracking-widest flex items-center gap-1">
+                  <mat-icon class="text-[14px] w-[14px] h-[14px]">refresh</mat-icon> Refresh
+                </button>
+             </div>
+             
+             <div class="overflow-x-auto custom-scrollbar">
+                <table class="w-full text-left text-sm text-slate-300">
+                   <thead class="text-xs text-slate-400 uppercase bg-black/40">
+                      <tr>
+                         <th scope="col" class="px-4 py-3 rounded-tl-xl border-b border-white/10">Token</th>
+                         <th scope="col" class="px-4 py-3 border-b border-white/10">Status</th>
+                         <th scope="col" class="px-4 py-3 border-b border-white/10">Pelanggan</th>
+                         <th scope="col" class="px-4 py-3 border-b border-white/10">Dibuat</th>
+                         <th scope="col" class="px-4 py-3 border-b border-white/10">Terakhir Digunakan</th>
+                         <th scope="col" class="px-4 py-3 rounded-tr-xl border-b border-white/10">Aksi</th>
+                      </tr>
+                   </thead>
+                   <tbody>
+                      @if (isLoadingTokens()) {
+                        <tr>
+                           <td colspan="6" class="px-4 py-8 text-center text-slate-500">
+                             <mat-icon class="animate-spin mb-2">autorenew</mat-icon>
+                             <div class="text-xs tracking-widest uppercase">Memuat token...</div>
+                           </td>
+                        </tr>
+                      } @else if (tokensList().length === 0) {
+                        <tr>
+                           <td colspan="6" class="px-4 py-8 text-center text-slate-500 text-xs tracking-widest uppercase">Belum ada token.</td>
+                        </tr>
+                      } @else {
+                        @for (t of tokensList(); track t.id) {
+                          <tr class="border-b border-white/5 hover:bg-white/5 transition-colors">
+                             <td class="px-4 py-3 font-mono font-bold text-emerald-400">{{ t.token }}</td>
+                             <td class="px-4 py-3">
+                                @if (t.valid) {
+                                  <span class="px-2 py-1 bg-emerald-500/20 text-emerald-400 rounded text-[10px] font-bold tracking-widest uppercase">Aktif</span>
+                                } @else {
+                                  <span class="px-2 py-1 bg-red-500/20 text-red-400 rounded text-[10px] font-bold tracking-widest uppercase">Nonaktif</span>
+                                }
+                             </td>
+                             <td class="px-4 py-3">
+                                @if (t.boundUser) {
+                                  <span class="text-blue-300 font-medium flex items-center gap-1"><mat-icon class="text-[14px] w-[14px] h-[14px]">person</mat-icon> {{ t.boundUser }}</span>
+                                } @else {
+                                  <span class="text-slate-500 italic text-xs">- Belum Terikat -</span>
+                                }
+                             </td>
+                             <td class="px-4 py-3 text-xs text-slate-400">
+                                {{ t.createdAt ? (t.createdAt | date:'mediumDate') : '-' }}
+                             </td>
+                             <td class="px-4 py-3 text-xs text-slate-400">
+                                {{ t.lastUsed ? (t.lastUsed | date:'medium') : '-' }}
+                             </td>
+                             <td class="px-4 py-3">
+                                <div class="flex items-center gap-2">
+                                   <button (click)="toggleToken(t.id, t.valid)" class="px-2 py-1 rounded bg-white/10 hover:bg-white/20 text-xs transition-colors" [title]="t.valid ? 'Nonaktifkan' : 'Aktifkan'">
+                                      <mat-icon class="text-[16px] w-[16px] h-[16px]">{{ t.valid ? 'block' : 'check_circle' }}</mat-icon>
+                                   </button>
+                                   <button (click)="resetToken(t.id)" class="px-2 py-1 rounded bg-orange-500/20 hover:bg-orange-500/40 text-orange-400 text-xs transition-colors" title="Reset Pelanggan" [disabled]="!t.boundUser">
+                                      <mat-icon class="text-[16px] w-[16px] h-[16px]">restart_alt</mat-icon>
+                                   </button>
+                                   <button (click)="deleteToken(t.id)" class="px-2 py-1 rounded bg-red-500/20 hover:bg-red-500/40 text-red-400 text-xs transition-colors" title="Hapus">
+                                      <mat-icon class="text-[16px] w-[16px] h-[16px]">delete</mat-icon>
+                                   </button>
+                                </div>
+                             </td>
+                          </tr>
+                        }
+                      }
+                   </tbody>
+                </table>
+             </div>
+          </div>
+
           <!-- Danger Zone -->
           <div class="bg-red-500/10 p-6 rounded-2xl border border-red-500/20 backdrop-blur-md shadow-xl">
              <h2 class="text-red-400 text-xs font-bold tracking-widest uppercase mb-2 flex items-center gap-2">
@@ -136,6 +217,9 @@ export class AdminDashboard implements OnInit {
   newTokens = signal<string[]>([]);
   isGeneratingTokens = signal(false);
   
+  tokensList = signal<any[]>([]);
+  isLoadingTokens = signal(false);
+  
   isUploading = signal(false);
   uploadProgress = signal(0);
   
@@ -147,6 +231,7 @@ export class AdminDashboard implements OnInit {
         this.router.navigate(['/']);
       } else {
         this.loadStats();
+        this.loadTokens();
       }
     }
   }
@@ -163,6 +248,58 @@ export class AdminDashboard implements OnInit {
       const coll = collection(db, 'kpj_data');
       const snapshot = await getCountFromServer(coll);
       this.totalData.set(snapshot.data().count);
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async loadTokens() {
+    this.isLoadingTokens.set(true);
+    try {
+      const tokensRef = collection(db, 'tokens');
+      const q = query(tokensRef, orderBy('createdAt', 'desc'), limit(100));
+      const snapshot = await getDocs(q);
+      const list = snapshot.docs.map(doc => ({
+        id: doc.id,
+        ...doc.data(),
+        createdAt: doc.data()['createdAt']?.toDate(),
+        lastUsed: doc.data()['lastUsed']?.toDate(),
+      }));
+      this.tokensList.set(list);
+    } catch (e) {
+      console.error(e);
+    } finally {
+      this.isLoadingTokens.set(false);
+    }
+  }
+
+  async toggleToken(tokenId: string, currentStatus: boolean) {
+    try {
+      const ref = doc(db, 'tokens', tokenId);
+      await updateDoc(ref, { valid: !currentStatus });
+      this.loadTokens();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async resetToken(tokenId: string) {
+    if (!confirm('Reset token ini agar dapat digunakan oleh pelanggan lain?')) return;
+    try {
+      const ref = doc(db, 'tokens', tokenId);
+      await updateDoc(ref, { boundUser: null });
+      this.loadTokens();
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  async deleteToken(tokenId: string) {
+    if (!confirm('Yakin ingin menghapus token ini?')) return;
+    try {
+      const ref = doc(db, 'tokens', tokenId);
+      await deleteDoc(ref);
+      this.loadTokens();
     } catch (e) {
       console.error(e);
     }
@@ -187,6 +324,7 @@ export class AdminDashboard implements OnInit {
     await batch.commit();
     this.newTokens.set(tokens);
     this.isGeneratingTokens.set(false);
+    this.loadTokens();
   }
 
   async onFileSelected(event: Event) {

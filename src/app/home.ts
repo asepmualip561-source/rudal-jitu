@@ -48,6 +48,16 @@ import { collection, query, where, getDocs } from 'firebase/firestore';
           @if (mode() === 'user') {
             <form [formGroup]="userForm" (ngSubmit)="loginUser()" class="space-y-6">
               <div>
+                <label for="username-input" class="block text-[10px] font-bold tracking-widest uppercase text-blue-400 mb-2">Nama Pelanggan</label>
+                <div class="relative mb-4">
+                  <mat-icon class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">person</mat-icon>
+                  <input 
+                    id="username-input"
+                    type="text" 
+                    formControlName="username"
+                    placeholder="Masukkan nama Anda..." 
+                    class="w-full bg-black/40 border border-white/20 rounded-xl py-4 pl-12 pr-4 text-white placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500 transition-all font-mono">
+                </div>
                 <label for="token-input" class="block text-[10px] font-bold tracking-widest uppercase text-blue-400 mb-2">Token Akses</label>
                 <div class="relative">
                   <mat-icon class="absolute left-4 top-1/2 -translate-y-1/2 text-slate-500">key</mat-icon>
@@ -127,7 +137,8 @@ export class Home {
   error = signal('');
 
   userForm = this.fb.group({
-    token: ['', Validators.required]
+    token: ['', Validators.required],
+    username: ['', Validators.required]
   });
 
   adminForm = this.fb.group({
@@ -141,22 +152,48 @@ export class Home {
     
     try {
       const tokenVal = this.userForm.value.token?.trim() || '';
+      const usernameVal = this.userForm.value.username?.trim() || '';
+      
       const tokensRef = collection(db, 'tokens');
-      const q = query(tokensRef, where('token', '==', tokenVal), where('valid', '==', true));
+      const q = query(tokensRef, where('token', '==', tokenVal));
       const querySnapshot = await getDocs(q);
       
       if (querySnapshot.empty) {
-        this.error.set('Token tidak valid atau sudah tidak aktif.');
+        this.error.set('Token tidak ditemukan.');
       } else {
-        // Mark as used (optional, keeping it valid for simplicity or up to admin rules)
-        // For now, let's just let them in if it's valid
+        const tokenDoc = querySnapshot.docs[0];
+        const tokenData = tokenDoc.data();
+        
+        if (tokenData['valid'] !== true) {
+          this.error.set('Token sudah tidak aktif.');
+          this.loading.set(false);
+          return;
+        }
+
+        if (tokenData['boundUser'] && tokenData['boundUser'] !== usernameVal) {
+          this.error.set('Token sudah digunakan oleh pelanggan lain.');
+          this.loading.set(false);
+          return;
+        }
+
+        // Bind token if not bound, and update lastUsed
+        const updateData: any = { lastUsed: new Date() };
+        if (!tokenData['boundUser']) {
+          updateData.boundUser = usernameVal;
+        }
+
+        const { updateDoc } = await import('firebase/firestore');
+        await updateDoc(tokenDoc.ref, updateData);
+
         if (isPlatformBrowser(this.platformId)) {
           sessionStorage.setItem('rudal_jitu_token', tokenVal);
+          sessionStorage.setItem('rudal_jitu_username', usernameVal);
         }
         this.router.navigate(['/user']);
       }
-    } catch {
+    } catch(e: any) {
       this.error.set('Terjadi kesalahan jaringan.');
+      console.error(e);
     } finally {
       this.loading.set(false);
     }
